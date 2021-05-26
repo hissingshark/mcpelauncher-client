@@ -33,6 +33,8 @@
 #include "core_patches.h"
 #include "thread_mover.h"
 
+#include <minecraft/symbols.h>
+
 static size_t base;
 LauncherOptions options;
 
@@ -84,7 +86,7 @@ int main(int argc, char *argv[]) {
 
     Log::trace("Launcher", "Loading hybris libraries");
     linker::init();
-    // Fix saving to internal storage without write access to /data/*
+    // Fix saving to internal storage without write access to /data
     shim::from_android_data_dir = "/data/data/com.mojang.minecraftpe";
     shim::to_android_data_dir = PathHelper::getPrimaryDataDirectory();
     StoreFactory::hasVerifiedGooglePlayStoreLicense = !forceGooglePlayStoreUnverified.get();
@@ -137,6 +139,8 @@ int main(int argc, char *argv[]) {
     Log::info("Launcher", "Loaded Minecraft library");
     Log::debug("Launcher", "Minecraft is at offset 0x%p", (void *) MinecraftUtils::getLibraryBase(handle));
     base = MinecraftUtils::getLibraryBase(handle);
+
+    minecraft_symbols_init(handle);
 
     ModLoader modLoader;
     modLoader.loadModsFromDirectory(PathHelper::getPrimaryDataDirectory() + "mods/");

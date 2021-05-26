@@ -3,7 +3,8 @@
 #include <vector>
 
 struct Mouse {
-    static void (*feed)(char, char, short, short, short, short);
+//    static void (*feed)(char, char, short, short, short, short);
+    static void (*feed)(char, signed char, short, short, short, short);
 };
 
 struct Keyboard {

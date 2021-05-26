@@ -6,6 +6,10 @@
 #include <log.h>
 #include <mcpelauncher/path_helper.h>
 
+//#include <minecraft/symbols.h>
+#include <minecraft/GameControllerManager.h>
+#include "minecraft_gamepad_mapping.h"
+
 WindowCallbacks::WindowCallbacks(GameWindow &window, JniSupport &jniSupport, FakeInputQueue &inputQueue) :
     window(window), jniSupport(jniSupport), inputQueue(inputQueue) {
     useDirectMouseInput = true;
@@ -67,7 +71,9 @@ void WindowCallbacks::onMouseRelativePosition(double x, double y) {
         inputQueue.addEvent(FakeMotionEvent(AMOTION_EVENT_ACTION_MOVE, 0, x, y));
 }
 void WindowCallbacks::onMouseScroll(double x, double y, double dx, double dy) {
-    char cdy = (char) std::max(std::min(dy * 127.0, 127.0), -127.0);
+    signed char cdy = (signed char) std::max(std::min(dy * 127.0, 127.0), -127.0);
+    signed char foo = -127;
+printf("DEBUG: Callback = %f / %d / %d\n", dy, (int)cdy, foo);
     if (useDirectMouseInput)
         Mouse::feed(4, cdy, 0, 0, (short) x, (short) y);
 }
@@ -122,6 +128,52 @@ void WindowCallbacks::onKeyboardText(std::string const& c) {
 void WindowCallbacks::onPaste(std::string const& str) {
     jniSupport.getTextInputHandler().onTextInput(str);
 }
+
+// minecraft symbols direct interface
+void WindowCallbacks::onGamepadState(int gamepad, bool connected) {
+    Log::trace("WindowCallbacks", "Gamepad %s #%i", connected ? "connected" : "disconnected", gamepad);
+    if (connected)
+        gamepads.insert({gamepad, GamepadData()});
+    else
+        gamepads.erase(gamepad);
+    if (GameControllerManager::sGamePadManager != nullptr)
+        GameControllerManager::sGamePadManager->setGameControllerConnected(gamepad, connected);
+}
+
+void WindowCallbacks::onGamepadButton(int gamepad, GamepadButtonId btn, bool pressed) {
+    int mid = MinecraftGamepadMapping::mapButton(btn);
+    auto state = pressed ? GameControllerButtonState::PRESSED : GameControllerButtonState::RELEASED;
+    if (GameControllerManager::sGamePadManager != nullptr && mid != -1) {
+        GameControllerManager::sGamePadManager->feedButton(gamepad, mid, state, true);
+        if (btn == GamepadButtonId::START && pressed)
+            GameControllerManager::sGamePadManager->feedJoinGame(gamepad, true);
+    }
+}
+
+void WindowCallbacks::onGamepadAxis(int gamepad, GamepadAxisId ax, float value) {
+    auto gpi = gamepads.find(gamepad);
+    if (gpi == gamepads.end())
+        return;
+
+    auto& gp = gpi->second;
+    if ((int) ax < 0 || (int) ax >= 6)
+        throw std::runtime_error("bad axis id");
+    gp.axis[(int) ax] = value;
+
+    if (ax == GamepadAxisId::LEFT_X || ax == GamepadAxisId::LEFT_Y) {
+//        gp.stickLeft[ax == GamepadAxisId::LEFT_Y ? 1 : 0] = value;
+        GameControllerManager::sGamePadManager->feedStick(gamepad, 0, (GameControllerStickState) 3, gp.axis[(int)GamepadAxisId::LEFT_X], -gp.axis[(int)GamepadAxisId::LEFT_Y]);
+    } else if (ax == GamepadAxisId::RIGHT_X || ax == GamepadAxisId::RIGHT_Y) {
+//        gp.stickRight[ax == GamepadAxisId::RIGHT_Y ? 1 : 0] = value;
+        GameControllerManager::sGamePadManager->feedStick(gamepad, 1, (GameControllerStickState) 3, gp.axis[(int)GamepadAxisId::RIGHT_X], -gp.axis[(int)GamepadAxisId::RIGHT_Y]);
+    } else if (ax == GamepadAxisId::LEFT_TRIGGER) {
+        GameControllerManager::sGamePadManager->feedTrigger(gamepad, 0, value);
+    } else if (ax == GamepadAxisId::RIGHT_TRIGGER) {
+        GameControllerManager::sGamePadManager->feedTrigger(gamepad, 1, value);
+    }
+}
+
+/* android gampepad interface
 void WindowCallbacks::onGamepadState(int gamepad, bool connected) {
     Log::trace("WindowCallbacks", "Gamepad %s #%i", connected ? "connected" : "disconnected", gamepad);
     if (connected)
@@ -140,6 +192,7 @@ void WindowCallbacks::queueGamepadAxisInputIfNeeded(int gamepad) {
                 if (gpi == gamepads.end())
                     return 0.f;
                 auto& gp = gpi->second;
+printf("DEBUG: Processed event for axis %d - found\t1: %f 2: %f 3: %f 4: %f 5: %f 6: %f\n", axis, gp.axis[0], gp.axis[1], gp.axis[2], gp.axis[3], gp.axis[4], gp.axis[5]);
                 if (axis == AMOTION_EVENT_AXIS_X) return gp.axis[(int) GamepadAxisId::LEFT_X];
                 if (axis == AMOTION_EVENT_AXIS_Y) return gp.axis[(int) GamepadAxisId::LEFT_Y];
                 if (axis == AMOTION_EVENT_AXIS_RX) return gp.axis[(int) GamepadAxisId::RIGHT_X];
@@ -147,17 +200,27 @@ void WindowCallbacks::queueGamepadAxisInputIfNeeded(int gamepad) {
                 if (axis == AMOTION_EVENT_AXIS_GAS) return gp.axis[(int) GamepadAxisId::LEFT_TRIGGER];
                 if (axis == AMOTION_EVENT_AXIS_BRAKE) return gp.axis[(int) GamepadAxisId::RIGHT_TRIGGER];
                 if (axis == AMOTION_EVENT_AXIS_HAT_X) {
-                    if (gp.button[(int) GamepadButtonId::DPAD_LEFT])
+                    if (gp.button[(int) GamepadButtonId::DPAD_LEFT]) {
+                        printf("DEBUG: Generated Dpad: Left\n");
                         return -1.f;
-                    if (gp.button[(int) GamepadButtonId::DPAD_RIGHT])
+                    }
+                    if (gp.button[(int) GamepadButtonId::DPAD_RIGHT]) {
+                        printf("DEBUG: Generated Dpad: Right\n");
                         return 1.f;
+                    }
+                    printf("DEBUG: Reset Dpad: X\n");
                     return 0.f;
                 }
                 if (axis == AMOTION_EVENT_AXIS_HAT_Y) {
-                    if (gp.button[(int) GamepadButtonId::DPAD_UP])
+                    if (gp.button[(int) GamepadButtonId::DPAD_UP]) {
+                        printf("DEBUG: Generated Dpad: Up\n");
                         return -1.f;
-                    if (gp.button[(int) GamepadButtonId::DPAD_DOWN])
+                    }
+                    if (gp.button[(int) GamepadButtonId::DPAD_DOWN]) {
+                        printf("DEBUG: Generated Dpad: Down\n");
                         return 1.f;
+                    }
+                    printf("DEBUG: Reset Dpad: Y\n");
                     return 0.f;
                 }
                 return 0.f;
@@ -166,6 +229,7 @@ void WindowCallbacks::queueGamepadAxisInputIfNeeded(int gamepad) {
 }
 
 void WindowCallbacks::onGamepadButton(int gamepad, GamepadButtonId btn, bool pressed) {
+printf("DEBUG: button %d %s\n", (int)btn, (pressed ? "pressed" : "released") );
     auto gpi = gamepads.find(gamepad);
     if (gpi == gamepads.end())
         return;
@@ -177,6 +241,7 @@ void WindowCallbacks::onGamepadButton(int gamepad, GamepadButtonId btn, bool pre
     gp.button[(int) btn] = pressed;
 
     if (btn == GamepadButtonId::DPAD_UP || btn == GamepadButtonId::DPAD_DOWN || btn == GamepadButtonId::DPAD_LEFT || btn == GamepadButtonId::DPAD_RIGHT) {
+printf("DEBUG: Queuing a Dpad button\n");
         queueGamepadAxisInputIfNeeded(gamepad);
         return;
     }
@@ -188,6 +253,7 @@ void WindowCallbacks::onGamepadButton(int gamepad, GamepadButtonId btn, bool pre
 }
 
 void WindowCallbacks::onGamepadAxis(int gamepad, GamepadAxisId ax, float value) {
+printf("DEBUG: Axis %d deflected to %f\n", ax, value);
     auto gpi = gamepads.find(gamepad);
     if (gpi == gamepads.end())
         return;
@@ -197,7 +263,7 @@ void WindowCallbacks::onGamepadAxis(int gamepad, GamepadAxisId ax, float value) 
     gp.axis[(int) ax] = value;
     queueGamepadAxisInputIfNeeded(gamepad);
 }
-
+*/
 void WindowCallbacks::loadGamepadMappings() {
     auto windowManager = GameWindowManager::getManager();
     std::vector<std::string> controllerDbPaths;
