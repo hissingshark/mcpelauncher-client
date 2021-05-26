@@ -1,6 +1,11 @@
 #include "fake_inputqueue.h"
+#include "armhfrewrite.h"
 
 #include <stdexcept>
+
+    float foo(const AInputEvent *event, int32_t axis, size_t pointerIndex) {
+        return ((const FakeMotionEvent *) (const void *) event)->axisFunction(axis);
+    };
 
 void FakeInputQueue::initHybrisHooks(std::unordered_map<std::string, void*> &syms) {
     syms["AInputQueue_getEvent"] = (void *) +[](AInputQueue *queue, AInputEvent **outEvent) {
@@ -57,9 +62,13 @@ void FakeInputQueue::initHybrisHooks(std::unordered_map<std::string, void*> &sym
     syms["AMotionEvent_getRawY"] = (void *) +[](const AInputEvent *event, size_t pointerIndex) {
         return ((const FakeMotionEvent *) (const void *) event)->y;
     };
-    syms["AMotionEvent_getAxisValue"] = (void *) +[](const AInputEvent *event, int32_t axis, size_t pointerIndex) {
+/*    syms["AMotionEvent_getAxisValue"] = (void *) +[](const AInputEvent *event, int32_t axis, size_t pointerIndex) {
         return ((const FakeMotionEvent *) (const void *) event)->axisFunction(axis);
-    };
+    }; */
+//    syms["AMotionEvent_getAxisValue"] = ARMHFREWRITE( & (+[](const AInputEvent *event, int32_t axis, size_t pointerIndex) -> float { return ((const FakeMotionEvent *) (const void *) event)->axisFunction(axis);}) );
+
+    syms["AMotionEvent_getAxisValue"] = ARMHFREWRITE(foo);
+
 }
 
 
